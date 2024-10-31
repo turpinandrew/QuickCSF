@@ -11,8 +11,8 @@ import numpy
 import matplotlib.pyplot as plt
 import pathlib
 
-import QuickCSF
-import plot
+from . import QuickCSF
+from .plot import plot
 
 logger = logging.getLogger('QuickCSF.simulate')
 
@@ -50,7 +50,7 @@ def runSimulation(
 	]])
 	qcsf = QuickCSF.QuickCSFEstimator(stimulusSpace, periphery=periphery)
 
-	graph = plot.plot(qcsf, unmappedTrueParams=unmappedTrueParams, show = imagePath is None)
+	graph = plot(qcsf, unmappedTrueParams=unmappedTrueParams, show = imagePath is None)
 
 	# Trial loop
 	for i in range(trials):
@@ -62,7 +62,7 @@ def runSimulation(
 		if usePerfectResponses:
 			logger.debug('Simulating perfect response')
 			frequency = newStimValues[:,1]
-			trueSens = numpy.power(10, QuickCSF.csf_unmapped(unmappedTrueParams, numpy.array([frequency])))
+			trueSens = numpy.power(10, qcsf.csf_unmapped(unmappedTrueParams, numpy.array([frequency])))
 			testContrast = newStimValues[:,0]
 			testSens = 1 / testContrast
 
@@ -77,7 +77,7 @@ def runSimulation(
 		# Update the plot
 		graph.clear()
 		graph.set_title(f'Estimated Contrast Sensitivity Function ({i+1})')
-		plot.plot(qcsf, graph, unmappedTrueParams, show = imagePath is None)
+		plot(qcsf, graph, unmappedTrueParams, show = imagePath is None)
 
 		if imagePath is not None:
 			plt.savefig(pathlib.Path(imagePath+'/%f.png' % time.time()).resolve())
@@ -123,7 +123,7 @@ def entropyPlot(qcsf):
 
 
 if __name__ == '__main__':
-	import log
+	from . import log
 	log.startLog()
 
 	parser = argparse.ArgumentParser()

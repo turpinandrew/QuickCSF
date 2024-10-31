@@ -108,7 +108,7 @@ class QuickCSFEstimator():
 		else:
 			parameterSpace = [
 				numpy.arange(0, 32),	# Peak sensitivity (32 values from 2..256)
-				numpy.arange(0, 8) ,	# Peak frequency
+				numpy.arange(0, 28) ,	# Peak frequency
 				numpy.arange(0, 27),	# Log bandwidth
 				numpy.arange(0, 41)	 # High frequency truncation limit
 			]

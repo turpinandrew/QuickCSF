@@ -3,7 +3,7 @@ import numpy
 import matplotlib
 import matplotlib.pyplot as plt
 
-import QuickCSF
+from . import QuickCSF
 
 #frequencyDomain = QuickCSF.makeFrequencySpace(.005, 80, 50).reshape(-1,1)
 
