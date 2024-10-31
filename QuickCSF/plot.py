@@ -3,7 +3,7 @@ import numpy
 import matplotlib
 import matplotlib.pyplot as plt
 
-from . import QuickCSF
+import QuickCSF
 
 #frequencyDomain = QuickCSF.makeFrequencySpace(.005, 80, 50).reshape(-1,1)
 
@@ -21,7 +21,7 @@ def plot(qCSFEstimator, graph=None, unmappedTrueParams=None, showNumbers=True, s
 			plt.show()
 
 	if unmappedTrueParams is not None:
-		truthData = QuickCSF.csf_unmapped(unmappedTrueParams.reshape(1, -1), frequencyDomain)
+		truthData = qCSFEstimator.csf_unmapped(unmappedTrueParams.reshape(1, -1), frequencyDomain)
 		truthData = numpy.power(10, truthData)
 		truthLine = graph.fill_between(
 			frequencyDomain.reshape(-1),
@@ -38,7 +38,7 @@ def plot(qCSFEstimator, graph=None, unmappedTrueParams=None, showNumbers=True, s
 		estimatedParamMeans['bandwidth'],
 		estimatedParamMeans['delta'],
 	]])
-	estimatedData = QuickCSF.csf_unmapped(estimatedParamMeans.reshape(1, -1), frequencyDomain)
+	estimatedData = qCSFEstimator.csf_unmapped(estimatedParamMeans.reshape(1, -1), frequencyDomain)
 	estimatedData = numpy.power(10, estimatedData)
 
 	estimatedLine = graph.fill_between(
@@ -74,13 +74,13 @@ def plot(qCSFEstimator, graph=None, unmappedTrueParams=None, showNumbers=True, s
 	graph.grid()
 
 	if showNumbers:
-		estimatedParamMeans = QuickCSF.mapCSFParams(estimatedParamMeans, exponify=True)
+		estimatedParamMeans = qCSFEstimator.mapCSFParams(estimatedParamMeans, exponify=True)
 		estimatedParamMeans = estimatedParamMeans.reshape(1,-1).tolist()[0]
 		paramEstimates = '%03.2f, %.4f, %.4f, %.4f' % tuple(estimatedParamMeans)
 		estimatedLine.set_label(f'Estim: {paramEstimates}')
 
 		if truthData is not None:
-			trueParams = QuickCSF.mapCSFParams(unmappedTrueParams, True).T.tolist()[0]
+			trueParams = qCSFEstimator.mapCSFParams(unmappedTrueParams, True).T.tolist()[0]
 			trueParams = '%03.2f, %.4f, %.4f, %.4f' % tuple(trueParams)
 			truthLine.set_label(f'Truth: {trueParams}')
 

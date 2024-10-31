@@ -10,11 +10,9 @@ import numpy
 
 import matplotlib.pyplot as plt
 import pathlib
-import argparseqt.gui
-import argparseqt.groupingTools
 
-from . import QuickCSF
-from .plot import plot
+import QuickCSF
+import plot
 
 logger = logging.getLogger('QuickCSF.simulate')
 
@@ -30,6 +28,7 @@ def runSimulation(
 		'truePeakSensitivity':18, 'truePeakFrequency':11,
 		'trueBandwidth':12, 'trueDelta':11,
 	},
+	periphery=False
 ):
 	logger.info('Starting simulation')
 
@@ -49,9 +48,9 @@ def runSimulation(
 		parameters['trueBandwidth'],
 		parameters['trueDelta'],
 	]])
-	qcsf = QuickCSF.QuickCSFEstimator(stimulusSpace)
+	qcsf = QuickCSF.QuickCSFEstimator(stimulusSpace, periphery=periphery)
 
-	graph = plot(qcsf, unmappedTrueParams=unmappedTrueParams)
+	graph = plot.plot(qcsf, unmappedTrueParams=unmappedTrueParams, show = imagePath is None)
 
 	# Trial loop
 	for i in range(trials):
@@ -78,7 +77,7 @@ def runSimulation(
 		# Update the plot
 		graph.clear()
 		graph.set_title(f'Estimated Contrast Sensitivity Function ({i+1})')
-		plot(qcsf, graph, unmappedTrueParams)
+		plot.plot(qcsf, graph, unmappedTrueParams, show = imagePath is None)
 
 		if imagePath is not None:
 			plt.savefig(pathlib.Path(imagePath+'/%f.png' % time.time()).resolve())
@@ -93,13 +92,14 @@ def runSimulation(
 	paramEstimates = qcsf.getResults()
 	logger.info('Results: ' + str(paramEstimates))
 
-	trueParams = QuickCSF.mapCSFParams(unmappedTrueParams, True).T
+	trueParams = qcsf.mapCSFParams(unmappedTrueParams, True).T
 	print('******* Results *******')
 	print(f'\tEstimates = {paramEstimates}')
 	print(f'\tActuals = {trueParams}')
 	print('***********************')
 	plt.ioff()
-	plt.show()
+	if imagePath is None:
+		plt.show()
 
 def entropyPlot(qcsf):
 	params = numpy.arange(qcsf.paramComboCount).reshape(-1, 1)
@@ -123,13 +123,15 @@ def entropyPlot(qcsf):
 
 
 if __name__ == '__main__':
-	from . import log
+	import log
 	log.startLog()
 
 	parser = argparse.ArgumentParser()
 
+	parser.add_argument('--noQT', default=False, action='store_true', help='Do not use QT ui for input')
+
 	parser.add_argument('-n', '--trials', type=int, help='Number of trials to simulate')
-	parser.add_argument('--imagePath', default=None, help='If specified, path to save images')
+	parser.add_argument('--imagePath', default=None, help='If specified, path to save images (does not plot to screen).')
 	parser.add_argument('-perfect', '--usePerfectResponses', default=False, action='store_true', help='Whether to simulate perfect responses, rather than probablistic ones')
 
 	stimuliSettings = parser.add_argument_group('stimuli')
@@ -147,12 +149,36 @@ if __name__ == '__main__':
 	parameterSettings.add_argument('-b', '--trueBandwidth', type=int, default=12, help='True bandwidth (index)')
 	parameterSettings.add_argument('-d', '--trueDelta', type=int, default=11, help='True delta truncation (index)')
 
-	settings = argparseqt.groupingTools.parseIntoGroups(parser)
-	if settings['trials'] is None:
-		from qtpy import QtWidgets
-		from . import ui
-		app = QtWidgets.QApplication()
-		settings = ui.getSettings(parser, settings, ['trials'])
+	parser.add_argument('--periphery', default=False, action='store_true', help='If present, use peripheral quickCSF. Rosen suggests -minf 1 -maxf 50 -fr 50 -cr 64.')
+
+	args = parser.parse_args()
+	if args.noQT:
+		settings = {}
+		if args.trials:
+			settings['trials'] = args.trials
+		if args.imagePath:
+			settings['imagePath'] = args.imagePath
+		if args.usePerfectResponses:
+			settings['usePerfectResponses'] = args.usePerfectResponses
+		settings['stimuli'] = {
+				'minContrast': args.minContrast, 'maxContrast': args.maxContrast, 'contrastResolution': args.contrastResolution,
+				'minFrequency': args.minFrequency, 'maxFrequency': args.maxFrequency, 'frequencyResolution': args.frequencyResolution,
+			}
+		settings['parameters'] = {
+				'truePeakSensitivity': args.truePeakSensitivity, 'truePeakFrequency': args.truePeakFrequency,
+				'trueBandwidth': args.trueBandwidth, 'trueDelta': args.trueDelta,
+			}
+		if args.periphery:
+			settings['periphery'] = args.periphery
+	else:
+		import argparseqt.gui
+		import argparseqt.groupingTools
+		settings = argparseqt.groupingTools.parseIntoGroups(parser)
+		if settings['trials'] is None:
+			from qtpy import QtWidgets
+			from . import ui
+			app = QtWidgets.QApplication()
+			settings = ui.getSettings(parser, settings, ['trials'])
 
 	if settings is not None:
 		runSimulation(**settings)

@@ -4,10 +4,28 @@
 	See Lesmes, L. A., Lu, Z. L., Baek, J., & Albright, T. D. (2010). Bayesian adaptive estimation of the contrast sensitivity function: The quick CSF method. Journal of vision, 10(3), 17-17.
 
 	Assumes a 4-parameter model of CSF:
-		Peak sensitivity: highest contrast level across all spatial frequencies
-		Peak frequency: the spatial frequency at which peak sensitivity occurs
-		Bandwidth: full-width at half-maximum
-		Delta: difference between peak sensitivity and truncation at low-frequencies
+		a = Peak sensitivity: highest contrast level across all spatial frequencies
+		b = Peak frequency: the spatial frequency at which peak sensitivity occurs
+		c = Bandwidth: full-width at half-maximum
+		d = Delta: difference between peak sensitivity and truncation at low-frequencies
+
+	log10(CSF(f)) = log10(a) - 4 * log10(2) * [log10(f/b) / log10(2 * c)]^2 if f >= b else log10(a) - d
+
+
+	The peripheral version is based on 
+
+	Robert Rosén; Linda Lundström; Abinaya Priya Venkataraman; Simon Winter; Peter Unsbo (2014).
+	Quick contrast sensitivity measurements in the periphery.
+	Journal of Vision July 2014, Vol.14, 3. doi:https://doi.org/10.1167/14.8.3
+
+	The peripheral version assumes a different 4-parameter model of CSF:
+		a = Peak sensitivity: highest contrast level across all spatial frequencies. start=1, stop=256, num=32 (log)
+		b = Peak frequency: the spatial frequency at which peak sensitivity occurs.  start=2, stop=12, num=8 (log)
+		c = Bandwidth: full-width at half-maximum									 start=1, stop=9, num=27 (log)
+		d = The high frequency truncation.										     start=2, stop=50, num=41 (log)
+
+	log10(CSF(f)) = log10(a) - 4 * log10(2) * [log10(f/b) / log10(2 * c)]^2 if f <= d else 0  
+
 '''
 
 import logging
@@ -62,101 +80,12 @@ def makeFrequencySpace(min=.2, max=36, count=20):
 
 	return frequencySpace
 
-def csf_unmapped(parameters, frequency):
-	'''The truncated log-parabola model for human contrast sensitivity
-
-		Expects UNMAPPED parameters
-		Param order = peak sensitivity, peak frequency, bandwidth, log delta
-	'''
-	# Get everything into log-units
-	[peakSensitivity, peakFrequency, logBandwidth, delta] = mapCSFParams(parameters)
-
-	return csf(peakSensitivity, peakFrequency, logBandwidth, delta, frequency)
-
-def csf(peakSensitivity, peakFrequency, logBandwidth, delta, frequency):
-	frequency = numpy.log10(frequency)
-
-	if not isinstance(peakSensitivity, Iterable):
-		delta = numpy.log10(peakSensitivity) - numpy.log10(peakSensitivity-delta)
-		delta = numpy.array([delta])
-
-		peakSensitivity = numpy.array([numpy.log10(peakSensitivity)])
-		peakFrequency = numpy.array([numpy.log10(peakFrequency)])
-		logBandwidth = numpy.array([numpy.log10(logBandwidth)])
-
-		frequency = numpy.array([[frequency]])
-
-	n = len(peakSensitivity)
-	m = len(frequency[0])
-
-	frequency = frequency.repeat(n, 0)
-
-	peakFrequency = peakFrequency[:,numpy.newaxis].repeat(m,1)
-	peakSensitivity = peakSensitivity[:,numpy.newaxis].repeat(m,1)
-	delta = delta[:,numpy.newaxis].repeat(m,1)
-
-	divisor = numpy.log10(2)+logBandwidth
-	divisor = divisor[:,numpy.newaxis].repeat(m,1)
-	truncation = (4 * numpy.log10(2) * numpy.power(numpy.divide(frequency-peakFrequency, divisor), 2))
-
-	logSensitivity = numpy.maximum(0, peakSensitivity - truncation)
-	Scutoff = numpy.maximum(logSensitivity, peakSensitivity-delta)
-	logSensitivity[frequency<peakFrequency] = Scutoff[frequency<peakFrequency]
-
-	return logSensitivity
-
-def aulcsf(peakSensitivity, peakFrequency, logBandwidth, delta, bucketWidth=.1):
-	def myCSF(frequency):
-		return csf(peakSensitivity, peakFrequency, logBandwidth, delta, frequency)[0][0]
-
-	gonePositive = False
-	done = False
-	frequency = 0
-	area = 0
-	while not done:
-		frequency += bucketWidth
-		height = myCSF(frequency)
-		if height > 0:
-			gonePositive = True
-
-		if gonePositive and height <= 0:
-			done = True
-		else:
-			area += height * bucketWidth
-
-	return area
-
-def mapCSFParams(params, exponify=False):
-	'''
-		Maps parameter indices to log values
-
-		Exponify will de-log them, leaving the following units:
-			Peak Sensitivity: 1/contrast
-			Peak Frequency: cycles per degree
-			Bandwidth: octaves
-			Delta: 1/contrast (Difference between Peak Sensitivity and the truncation)
-	'''
-	peakSensitivity = 0.1*params[:,0] + 0.3
-	peakFrequency = -0.7 + 0.1*params[:,1]
-	bandwidth = 0.05 * params[:,2]
-	logDelta = -1.7 + 0.1 * params[:,3]
-	delta = numpy.power(10, logDelta)
-
-	if exponify:
-		deltaDiff = numpy.power(10, peakSensitivity-delta)
-
-		peakSensitivity = numpy.power(10, peakSensitivity)
-		peakFrequency = numpy.power(10, peakFrequency)
-		bandwidth = numpy.power(10, bandwidth)
-		delta = peakSensitivity - deltaDiff
-
-	return numpy.stack((peakSensitivity, peakFrequency, bandwidth, delta))
-
 def entropy(p):
 	return numpy.multiply(-p, numpy.log(p)) - numpy.multiply(1-p, numpy.log(1-p))
 
+
 class QuickCSFEstimator():
-	def __init__(self, stimulusSpace=None):
+	def __init__(self, stimulusSpace=None, periphery=False):
 		'''Create a new QuickCSF estimator with the specified input/output spaces
 
 			Args:
@@ -169,18 +98,28 @@ class QuickCSFEstimator():
 				makeFrequencySpace()
 			]
 
-		parameterSpace = [
-			numpy.arange(0, 28),	# Peak sensitivity
-			numpy.arange(0, 21),	# Peak frequency
-			numpy.arange(0, 21),	# Log bandwidth
-			numpy.arange(0, 21)		# Low frequency truncation (log delta)
-		]
+		if not periphery:
+			parameterSpace = [
+				numpy.arange(0, 28),	# Peak sensitivity
+				numpy.arange(0, 21),	# Peak frequency
+				numpy.arange(0, 21),	# Log bandwidth
+				numpy.arange(0, 21)		# Low frequency truncation (log delta)
+			]
+		else:
+			parameterSpace = [
+				numpy.arange(0, 32),	# Peak sensitivity (32 values from 2..256)
+				numpy.arange(0, 8) ,	# Peak frequency
+				numpy.arange(0, 27),	# Log bandwidth
+				numpy.arange(0, 41)	 # High frequency truncation limit
+			]
 
 		logger.info('Initializing QuickCSFEStimator')
 		logger.debug('Initializing QuickCSFEstimator stimSpace='+str(stimulusSpace).replace('\n','')+', paramSpace='+str(parameterSpace).replace('\n',''))
 
 		self.stimulusSpace = stimulusSpace
 		self.parameterSpace = parameterSpace
+
+		self.periphery = periphery
 
 		self.stimulusRanges = [len(sSpace) for sSpace in self.stimulusSpace]
 		self.stimComboCount = numpy.prod(self.stimulusRanges)
@@ -191,12 +130,136 @@ class QuickCSFEstimator():
 		self.d = 0.5
 		self.sig = 0.25
 
-		# Probabilities (initialize all of them to equal values that sum to 1)
+		# Prior probabilities (initialize all of them to equal values that sum to 1)
 		self.probabilities = numpy.ones((self.paramComboCount,1))/self.paramComboCount
 
 		self.currentStimulusIndex = None
 		self.currentStimParamIndices = None
 		self.responseHistory = []
+
+	def mapCSFParams(self, params, exponify=False):
+		'''
+			Maps parameter indices to log values
+
+			Exponify will de-log them, leaving the following units:
+				Peak Sensitivity: 1/contrast
+				Peak Frequency: cycles per degree
+				Bandwidth: octaves
+				Delta: if not periphery 1/contrast (Difference between Peak Sensitivity and the truncation)
+					if periphery cycles/degree where truncation occurs
+		'''
+		if not self.periphery:
+			peakSensitivity = 0.1*params[:,0] + 0.3
+			peakFrequency = -0.7 + 0.1*params[:,1]
+			bandwidth = 0.05 * params[:,2]
+			logDelta = -1.7 + 0.1 * params[:,3]
+			delta = numpy.power(10, logDelta)
+		else:
+			peakSensitivity = 0.30103 + 0.06797452 * params[:,0]	# log10(2) + (log10(256) - log10(2)) / (32 -1) * i
+			peakFrequency = 0.0 + 0.04 * params[:,1]     			# log10(1) + (log10(12) - log10(1)) / (28 - 1) * i
+			bandwidth = 0.0 +  0.03670163 * params[:,2]	      		# log10(1) + (log10(9) - log10(1)) / (27 - 1) * i
+			delta =  0.30103 + 0.0349485 * params[:,3]			  	# log10(2) + (log10(50) - log10(2)) / (41 - 1) * i
+
+		if exponify:
+			if not self.periphery:
+				deltaDiff = numpy.power(10, peakSensitivity-delta)
+
+			peakSensitivity = numpy.power(10, peakSensitivity)
+			peakFrequency = numpy.power(10, peakFrequency)
+			bandwidth = numpy.power(10, bandwidth)
+
+			if not self.periphery:
+				delta = peakSensitivity - deltaDiff
+			else:
+				delta = numpy.power(10, delta)	# I am not sure about this one
+
+		return numpy.stack((peakSensitivity, peakFrequency, bandwidth, delta))
+
+	def csf_unmapped(self, parameters, frequency):
+		'''The truncated log-parabola model for human contrast sensitivity
+
+			Expects UNMAPPED parameters
+			Param order = peak sensitivity, peak frequency, bandwidth, log delta
+		'''
+		# Get everything into log-units
+		[peakSensitivity, peakFrequency, logBandwidth, delta] = self.mapCSFParams(parameters)
+
+		return self.csf(peakSensitivity, peakFrequency, logBandwidth, delta, frequency)
+
+	def csf(self, peakSensitivity, peakFrequency, logBandwidth, delta, frequency):
+		'''Return values of log10(csf(frequency)).
+
+		If periphery is true, then the peripheral version of the CSF function is used.
+
+		Parameters
+		----------
+		peakSensitivity : float
+		peakFrequency : float
+		logBandwidth : float
+		delta : float
+			If periphery is true, this is the left-truncation point of the CSF function (d) in cycles/degree.
+			If periphery is false, this is the truncation level at low spatial frequencies log(sensitivity).
+			
+		Returns
+		-------
+		logSensitivity: [float]
+		'''
+		frequency = numpy.log10(frequency)
+
+		if not isinstance(peakSensitivity, Iterable):
+			if not self.periphery:
+				delta = numpy.log10(peakSensitivity) - numpy.log10(peakSensitivity-delta)
+			delta = numpy.array([delta])
+
+			peakSensitivity = numpy.array([numpy.log10(peakSensitivity)])
+			peakFrequency = numpy.array([numpy.log10(peakFrequency)])
+			logBandwidth = numpy.array([numpy.log10(logBandwidth)])
+
+			frequency = numpy.array([[frequency]])
+
+		n = len(peakSensitivity)
+		m = len(frequency[0])
+
+		frequency = frequency.repeat(n, 0)
+
+		peakFrequency = peakFrequency[:,numpy.newaxis].repeat(m,1)
+		peakSensitivity = peakSensitivity[:,numpy.newaxis].repeat(m,1)
+		delta = delta[:,numpy.newaxis].repeat(m,1)
+
+		divisor = numpy.log10(2)+logBandwidth
+		divisor = divisor[:,numpy.newaxis].repeat(m,1)
+		truncation = (4 * numpy.log10(2) * numpy.power(numpy.divide(frequency-peakFrequency, divisor), 2))
+
+		logSensitivity = numpy.maximum(0, peakSensitivity - truncation)
+
+		if not self.periphery:
+			Scutoff = numpy.maximum(logSensitivity, peakSensitivity-delta)
+			logSensitivity[frequency<peakFrequency] = Scutoff[frequency<peakFrequency]
+		else:
+			logSensitivity[frequency > delta] = 0
+
+		return logSensitivity
+
+	def aulcsf(self, peakSensitivity, peakFrequency, logBandwidth, delta, bucketWidth=.1):
+		def myCSF(frequency):
+			return self.csf(peakSensitivity, peakFrequency, logBandwidth, delta, frequency)[0][0]
+
+		gonePositive = False
+		done = False
+		frequency = 0
+		area = 0
+		while not done:
+			frequency += bucketWidth
+			height = myCSF(frequency)
+			if height > 0:
+				gonePositive = True
+
+			if gonePositive and height <= 0:
+				done = True
+			else:
+				area += height * bucketWidth
+
+		return area
 
 	def next(self):
 		'''Determine the next stimulus to be tested'''
@@ -272,7 +335,7 @@ class QuickCSFEstimator():
 		stimulusIndices = self.inflateStimulusIndex(stimulusIndex)
 
 		frequencies = self.stimulusSpace[1][stimulusIndices[:,1]].reshape(1,-1)
-		csfValues = csf_unmapped(parameters, frequencies)
+		csfValues = self.csf_unmapped(parameters, frequencies)
 
 		# Make vector of sensitivities
 		contrast = self.stimulusSpace[0][stimulusIndices[:,0]]
@@ -353,7 +416,7 @@ class QuickCSFEstimator():
 		results = estimatedParamMeans.reshape(1,len(self.parameterRanges))
 
 		if not leaveAsIndices:
-			results = mapCSFParams(results, True).T
+			results = self.mapCSFParams(results, True).T
 
 		results = results.reshape(4).tolist()
 
@@ -362,5 +425,5 @@ class QuickCSFEstimator():
 			'peakFrequency': results[1],
 			'bandwidth': results[2],
 			'delta': results[3],
-			'aulcsf': aulcsf(*results)
+			'aulcsf': self.aulcsf(*results)
 		}
